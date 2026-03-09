@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+
+build/
+dist/
+
+*.zip
+
+vosk-model*
+vosk_models/
+
+history.json
+
+test.py
+testtest2.py
+testtest.py

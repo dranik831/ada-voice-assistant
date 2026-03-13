@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Голосовой ассистент — Silero TTS (локально, без стриминга).
-Сохраняет привычный функционал: Whisper, Ollama, история, триггеры.
-"""
 import os
 import sys
 from pathlib import Path

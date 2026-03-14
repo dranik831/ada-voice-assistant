@@ -63,15 +63,14 @@ system = str(platform.system()).lower()
 
 # === настройки по умолчанию ===
 DEFAULT_CONFIG = {
-    "OLLAMA_URL": "http://77.94.115.215:11434/api/generate",
-    "MODEL_NAME": "qwen2.5-coder:latest",
-    "MAX_HISTORY": 10,
+    "OLLAMA_URL": "http://127.0.0.1:11434/api/generate",
+    "MODEL_NAME": "llama3:latest",
+    "MAX_HISTORY": 15,
     "SILENCE_TIMEOUT": 1.5,
     "FOLLOWUP_WINDOW": 5.0,
     "TRIGGER": ["ада", "а да", "а, да", "ага"],
-    "WHISPER_MODEL": "base",
+    "WHISPER_MODEL": "small",
     "SAMPLE_RATE": 16000,
-    # TTS (silero)
     "TTS_ENGINE": "silero",  # silero или pyttsx3
     "SILERO_SPEAKER": "baya",
     "SILERO_SR": 48000,
@@ -357,7 +356,7 @@ def init_silero(config):
             SILERO_MODEL = model_tuple[0]
         else:
             SILERO_MODEL = model_tuple
-        SILERO_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        SILERO_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "сpu")
         SILERO_MODEL.to(SILERO_DEVICE)
         print(f"✅ Silero загружен (device={SILERO_DEVICE}, sr={SILERO_SR}, speaker={SILERO_SPEAKER})")
     except Exception as e:

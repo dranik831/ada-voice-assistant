@@ -74,6 +74,7 @@ DEFAULT_CONFIG = {
     "TTS_ENGINE": "silero",  # silero или pyttsx3
     "SILERO_SPEAKER": "baya",
     "SILERO_SR": 48000,
+    "SMART_HOME_URL": "http://192.168.0.103",
 }
 
 # === звуки ===
@@ -96,10 +97,15 @@ def load_config():
             print("Ошибка при загрузке config.json:", e)
     return cfg
 
-def load_system_prompt(path):
+def load_system_prompt(path, devices=None, smart_home_url=None):
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return f.read().strip()
+            prompt = f.read().strip()
+        if smart_home_url:
+            prompt = prompt.replace("SMART_HOME_URL", smart_home_url)
+        if devices:
+            prompt += "\n\nСПИСОК ДОСТУПНЫХ УСТРОЙСТВ УМНОГО ДОМА:\n" + "\n".join(devices)
+        return prompt
     except Exception:
         return ""
 
@@ -122,12 +128,33 @@ def save_history(history):
     except Exception as e:
         print("❌ Ошибка сохранения:", e)
 
+
+def get_smart_home_devices(url):
+    if not url:
+        return []
+    try:
+        response = requests.get(f"{url}/devices", timeout=5)
+        if response.status_code == 200:
+            devices = response.text.strip().split('\n')
+            device_list = []
+            for dev in devices:
+                parts = dev.split(':')
+                if len(parts) >= 3:
+                    device_list.append(f"- Устройство {parts[0]}: {parts[2]} (состояние: {parts[1]})")
+            return device_list
+        else:
+            print(f"Ошибка получения устройств: статус {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"Ошибка получения устройств: {e}")
+        return []
+
 def play_sound(name):
     path = SOUND_PATHS.get(name)
     if not path:
         return
     if not os.path.exists(path):
-        print(f"⚠️ звук не найден: {path}")
+        print(f"Звук не найден: {path}")
         return
     if not playsound:
         print("playsound3 не установлен — звук не проигран")
@@ -140,7 +167,7 @@ def play_sound(name):
 # -------------------------
 # Ollama
 # -------------------------
-def llama(prompt, system_prompt, history=None, model_name="qwen2.5-coder:latest", url="http://77.94.115.215:11434/api/generate", timeout=60):
+def llama(prompt, system_prompt, history=None, model_name="qwen2.5-coder:latest", url="http://127.0.0.1:11434/api/generate", timeout=300):
     history_text = ""
     if history:
         for turn in history:
@@ -152,7 +179,7 @@ def llama(prompt, system_prompt, history=None, model_name="qwen2.5-coder:latest"
     full_prompt = f"{system_prompt}\n\n{history_text}\nПользователь: {prompt}\nИИ:"
     data = {"model": model_name, "prompt": full_prompt, "stream": False}
 
-    print("🔌 Подключаюсь...")
+    print("Подключаюсь...")
     start_time = time.time()
     try:
         response = requests.post(url, json=data, stream=False, timeout=timeout)
@@ -168,13 +195,15 @@ def llama(prompt, system_prompt, history=None, model_name="qwen2.5-coder:latest"
                     text += chunk_text
             except Exception:
                 pass
-        print(f"✅ За {time.time() - start_time:.2f} сек")
+        print(f"За {time.time() - start_time:.2f} сек")
         return text.strip()
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Ошибка: {e}")
         return ""
 
-def check_ollama_connection(url="http://77.94.115.215:11434/api/tags"):
+def check_ollama_connection(url=None):
+    if url is None:
+        url = "http://127.0.0.1:11434/api/tags"
     try:
         r = requests.get(url, timeout=5)
         return r.status_code == 200
@@ -188,18 +217,18 @@ def setup_whisper(model_name="base"):
     if whisper is None:
         print("Whisper не установлен. pip install -U openai-whisper")
         return None
-    print(f"📥 Загружаю модель '{model_name}'...")
+    print(f"Загружаю модель '{model_name}'...")
     try:
         model = whisper.load_model(model_name)
-        print(f"✅ Модель загружена")
+        print(f"Модель загружена")
         return model
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Ошибка: {e}")
         return None
 
 def recognize_audio_array(model, audio_array, trigger_hint="", sample_rate=16000):
     try:
-        print(f"🎙️ Распознаю...")
+        print(f"Распознаю...")
         start_time = time.time()
         audio = audio_array.astype(np.float32) / 32768.0
         result = model.transcribe(
@@ -212,10 +241,10 @@ def recognize_audio_array(model, audio_array, trigger_hint="", sample_rate=16000
         elapsed = time.time() - start_time
         text = result.get("text", "").strip()
         if text:
-            print(f"✅ За {elapsed:.2f} сек: '{text}'")
+            print(f"За {elapsed:.2f} сек: '{text}'")
         return text
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Ошибка: {e}")
         return ""
 
 # -------------------------
@@ -232,7 +261,7 @@ def listen_until_silence(model, device_index=None, silence_timeout=1.5, max_dura
         except Exception:
             device_index = None
 
-    print(f"🎤 Говорите ({max_duration} сек)...")
+    print(f"Говорите ({max_duration} сек)...")
     frames = []
     silence_frames = 0
     try:
@@ -260,17 +289,17 @@ def listen_until_silence(model, device_index=None, silence_timeout=1.5, max_dura
             sys.stdout.flush()
             if silence_frames > int(silence_timeout * 7.8):
                 if len(frames) > 10:
-                    print("\n⏸️ Тишина")
+                    print("\nТишина")
                     break
         stream.stop_stream()
         stream.close()
     except Exception as e:
-        print(f"\n❌ Ошибка потока: {e}")
+        print(f"\nОшибка потока: {e}")
         p.terminate()
         return ""
     p.terminate()
     if len(frames) < 5:
-        print("⏭️ Короткая запись")
+        print("Короткая запись")
         return ""
     print("🔄 Объединяю аудио...")
     audio_bytes = b''.join(frames)
@@ -314,19 +343,19 @@ def listen_with_timeout(model, device_index=None, timeout=3.0, sample_rate=16000
             else:
                 silence_frames += 1
             if has_sound and silence_frames > int(1.0 * 7.8):
-                print("\n✓ Завершено")
+                print("\nЗавершено")
                 break
         stream.stop_stream()
         stream.close()
     except Exception as e:
-        print(f"\n❌ Ошибка потока: {e}")
+        print(f"\nОшибка потока: {e}")
         p.terminate()
         return ""
     p.terminate()
     if not has_sound or len(frames) < 3:
-        print("\n⏭️ Только молчание")
+        print("\nТолько молчание")
         return ""
-    print("\n🔄 Обработка...")
+    print("\nОбработка...")
     audio_bytes = b''.join(frames)
     audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
     text = recognize_audio_array(model, audio_array, trigger_hint, sample_rate)
@@ -349,25 +378,25 @@ def init_silero(config):
     SILERO_SR = int(config.get("SILERO_SR", SILERO_SR))
     SILERO_SPEAKER = config.get("SILERO_SPEAKER", SILERO_SPEAKER)
     try:
-        print("🔊 Загружаю Silero TTS (torch.hub)...")
+        print("Загружаю Silero TTS (torch.hub)...")
         model_tuple = torch.hub.load(repo_or_dir="snakers4/silero-models", model="silero_tts", language="ru", speaker="v3_1_ru")
         # model_tuple обычно (model, example_text)
         if isinstance(model_tuple, (tuple, list)):
             SILERO_MODEL = model_tuple[0]
         else:
             SILERO_MODEL = model_tuple
-        SILERO_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "сpu")
+        SILERO_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         SILERO_MODEL.to(SILERO_DEVICE)
-        print(f"✅ Silero загружен (device={SILERO_DEVICE}, sr={SILERO_SR}, speaker={SILERO_SPEAKER})")
+        print(f"Silero загружен (device={SILERO_DEVICE}, sr={SILERO_SR}, speaker={SILERO_SPEAKER})")
     except Exception as e:
-        print("❌ Ошибка загрузки Silero:", e)
+        print("Ошибка загрузки Silero:", e)
         SILERO_MODEL = None
 
 def speak_silero_fulltext(text, config):
     """Синтез полного текста (разбиваем на предложения, конкатенируем аудио), затем воспроизводим единым файлом."""
     global SILERO_MODEL, SILERO_SR, SILERO_SPEAKER
     if SILERO_MODEL is None:
-        print("❌ Silero модель не инициализирована")
+        print("Silero модель не инициализирована")
         return False
 
     if sd is None:
@@ -383,21 +412,16 @@ def speak_silero_fulltext(text, config):
             continue
         try:
             audio = SILERO_MODEL.apply_tts(text=s, speaker=SILERO_SPEAKER, sample_rate=SILERO_SR)
-            audio = np.asarray(audio)
-            # нормализуем, если вернулся int16
-            if np.issubdtype(audio.dtype, np.integer):
-                audio = audio.astype(np.float32) / np.iinfo(np.int16).max
-            # если амплитуда больше 1, нормализуем
+            audio = np.asarray(audio).astype(np.float32)
+            # нормализуем, если амплитуда больше 1
             maxv = np.max(np.abs(audio)) if audio.size else 1.0
             if maxv > 1.0:
                 audio = audio / maxv
-            # ensure float32
-            audio = audio.astype(np.float32)
             parts.append(audio)
         except Exception as e:
             print("Ошибка Silero synth для фразы:", s, " — ", e)
     if not parts:
-        print("❌ Ни одна фраза не синтезирована")
+        print("Ни одна фраза не синтезирована")
         return False
     # конкатенируем все части в один массив
     out = np.concatenate(parts)
@@ -416,7 +440,7 @@ def speak_pyttsx3_local(text, speed=1.0):
     try:
         import pyttsx3
     except Exception as e:
-        print("pyttsx3 не установлен:", e)
+        print("pyttsx3 не установлен, ошибка:", e)
         return False
     try:
         engine = pyttsx3.init()
@@ -435,24 +459,25 @@ def speak_pyttsx3_local(text, speed=1.0):
         return False
 
 # Универсальная функция speak (интерфейс старый)
-def speak(text, *args, **kwargs):
-
+def speak(text, tts_engine=None, tts_voice=None, tts_speed=1.0):
     if not text:
         return
 
     if SILERO_MODEL is None:
-        print("❌ Silero не загружен")
+        print("Silero не загружен")
+        print(text)
+        return
+
+    if sd is None:
+        print("sounddevice не установлен — воспроизведение невозможно")
         print(text)
         return
 
     try:
-
         sentences = re.split(r'(?<=[.!?])\s+', text)
-
         audio_parts = []
 
         for sentence in sentences:
-
             if not sentence.strip():
                 continue
 
@@ -462,7 +487,11 @@ def speak(text, *args, **kwargs):
                 sample_rate=SILERO_SR
             )
 
-            audio = np.array(audio, dtype=np.float32)
+            audio = np.asarray(audio).astype(np.float32)
+            # нормализуем, если амплитуда больше 1
+            maxv = np.max(np.abs(audio)) if audio.size else 1.0
+            if maxv > 1.0:
+                audio = audio / maxv
 
             audio_parts.append(audio)
 
@@ -470,14 +499,13 @@ def speak(text, *args, **kwargs):
             return
 
         audio_full = np.concatenate(audio_parts)
-
-        print("🔊 Воспроизвожу Silero")
-
+        print("Воспроизвожу Silero")
         sd.play(audio_full, SILERO_SR)
         sd.wait()
 
     except Exception as e:
-        print("❌ Ошибка TTS:", e)
+        print(f"Ошибка TTS: {e}")
+        traceback.print_exc()
 
 # -------------------------
 # process_answer (как у тебя)
@@ -487,19 +515,19 @@ def process_answer(answer: str, tts_engine, tts_voice, tts_speed):
 
     if system == "windows":
         for cmd in re.findall(r"\[\[\s*(?:powershell|ps)\s*:\s*(.*?)\s*\]\]", answer, re.I):
-            print(f"⚙️ Выполняю: {cmd}")
+            print(f"Выполняю: {cmd}")
             subprocess.Popen(["powershell", "-NoProfile", "-Command", cmd], shell=False)
             executed = True
     else:
         for cmd in re.findall(r"\[\[\s*bash\s*:\s*(.*?)\s*\]\]", answer, re.I):
-            print(f"⚙️ Выполняю: {cmd}")
+            print(f"Выполняю: {cmd}")
             subprocess.Popen(["bash", "-c", cmd], shell=False)
             executed = True
 
     clean = re.sub(r"\[\[.*?\]\]", "", answer).strip()
 
     if clean:
-        print("🤖 Ассистент:", clean)
+        print("Ассистент:", clean)
         speak(clean, tts_engine, tts_voice, tts_speed)
 
 # -------------------------
@@ -523,7 +551,7 @@ def update_shortcuts_desktop():
         return
 
     desktop = get_desktop_path()
-    print(f"📁 Сканирую: {desktop}")
+    print(f"Сканирую: {desktop}")
     shortcuts = []
 
     try:
@@ -532,18 +560,18 @@ def update_shortcuts_desktop():
         shortcuts.extend(glob_lnk)
         shortcuts.extend(glob_exe)
     except Exception as e:
-        print("❌ Ошибка:", e)
+        print("Ошибка:", e)
 
     shortcuts = sorted(set(shortcuts))
 
     try:
         with open(SHORTCUTS_FILE, "w", encoding="utf-8") as f:
             json.dump(shortcuts, f, ensure_ascii=False, indent=2)
-        msg = f"✅ Обновлено {len(shortcuts)} ярлыков"
+        msg = f"Обновлено {len(shortcuts)} ярлыков"
         print(msg)
         speak(msg, "silero", None, 1.0)
     except Exception as e:
-        print("❌ Ошибка:", e)
+        print("Ошибка:", e)
 
 # -------------------------
 # MAIN
@@ -555,6 +583,7 @@ def main():
     MAX_HISTORY = int(config.get("MAX_HISTORY", 10))
     SILENCE_TIMEOUT = float(config.get("SILENCE_TIMEOUT", 1.5))
     FOLLOWUP_WINDOW = float(config.get("FOLLOWUP_WINDOW", 5.0))
+    SMART_HOME_URL = config.get("SMART_HOME_URL")
 
     TRIGGERS = config.get("TRIGGER", ["ада"])
     if isinstance(TRIGGERS, str):
@@ -569,33 +598,40 @@ def main():
     TTS_SPEED = float(config.get("TTS_SPEED", 1.0))
 
     print("\n" + "=" * 60)
-    print("🎙️ ГОЛОСОВОЙ АССИСТЕНТ (Silero TTS — non-streaming)")
+    print("ГОЛОСОВОЙ АССИСТЕНТ (Silero TTS — non-streaming)")
     print("=" * 60)
 
-    print("\n🔍 Проверка Ollama...")
+    print("\nПроверка Ollama...")
     if check_ollama_connection():
-        print("✅ Ollama доступен")
+        print("Ollama доступен")
     else:
-        print("⚠️ Ollama может быть недоступен")
+        print("Ollama может быть недоступен")
 
-    print("\n📥 Инициализация Whisper...")
+    print("\nИнициализация Whisper...")
     model = None
     if WHISPER_MODEL:
         model = setup_whisper(WHISPER_MODEL)
         if model is None:
-            print("❗ Whisper не инициализирован — голосовой ввод отключён.")
+            print("Whisper не инициализирован — голосовой ввод отключён.")
 
     # init silero
     init_silero(config)
 
-    system_prompt = load_system_prompt(SYSTEM_PROMPT_FILE)
+    # get smart home devices
+    devices = get_smart_home_devices(SMART_HOME_URL)
+    if devices:
+        print(f"Загружено {len(devices)} устройств умного дома")
+    else:
+        print("Устройства умного дома не загружены")
+
+    system_prompt = load_system_prompt(SYSTEM_PROMPT_FILE, devices, SMART_HOME_URL)
     history = load_history(MAX_HISTORY)
 
     print(f"\n{'=' * 60}")
-    print(f"✅ ГОТОВО!")
-    print(f"🎙️ Триггеры: {', '.join(TRIGGERS)}")
-    print(f"🔊 TTS engine: {TTS_ENGINE}")
-    print(f"📚 История: {len(history)} записей")
+    print(f"OK ГОТОВО!")
+    print(f"Триггеры: {', '.join(TRIGGERS)}")
+    print(f"TTS engine: {TTS_ENGINE}")
+    print(f"История: {len(history)} записей")
     print(f"{'=' * 60}\n")
 
     play_sound("idle")
@@ -603,7 +639,7 @@ def main():
     try:
         while True:
             print("\n" + "=" * 60)
-            print("💬 ПРОСЛУШИВАНИЕ (ЖДЁМ ТРИГГЕР)")
+            print("ПРОСЛУШИВАНИЕ (ЖДЁМ ТРИГГЕР)")
             print("=" * 60)
 
             user_raw = listen_until_silence(
@@ -616,10 +652,10 @@ def main():
             )
 
             if not user_raw or len(user_raw) < 2:
-                print("⏭️ Повторите\n")
+                print("Повторите\n")
                 continue
 
-            print(f"\n👤 Вы: {user_raw}")
+            print(f"\nВы: {user_raw}")
 
             found_trigger = None
             text_clean = re.sub(r'[^\w\s]', '', user_raw).lower()
@@ -629,10 +665,10 @@ def main():
                     break
 
             if not found_trigger:
-                print(f"⏳ Жду триггер: {', '.join(TRIGGERS)}\n")
+                print(f"Жду триггер: {', '.join(TRIGGERS)}\n")
                 continue
 
-            print(f"✅ Триггер '{found_trigger}' найден!\n")
+            print(f"Триггер '{found_trigger}' найден!\n")
 
             user_time = datetime.datetime.now().strftime("%H:%M:%S")
             user_text_for_model = f"[{user_time}] {user_raw}"
@@ -646,23 +682,23 @@ def main():
 
             if "очисти" in low or "стоп" in low or "пока" in low:
                 if "стоп" in low or "пока" in low:
-                    print("👋 До свидания!")
+                    print("До свидания!")
                     speak("До свидания", TTS_ENGINE, TTS_VOICE, TTS_SPEED)
                     break
                 else:
                     history = deque(maxlen=MAX_HISTORY)
                     save_history(history)
-                    print("🗑️ Очищено")
+                    print("Очищено")
                     speak("Память очищена", TTS_ENGINE, TTS_VOICE, TTS_SPEED)
                     continue
 
-            print("⏳ Обрабатываю...")
+            print("Обрабатываю...")
             play_sound("think")
 
             try:
                 answer = llama(user_text_for_model, system_prompt, history, MODEL_NAME, OLLAMA_URL)
             except Exception as e:
-                print(f"❌ Ошибка: {e}")
+                print(f"Ошибка: {e}")
                 answer = ""
 
             if answer:
@@ -681,7 +717,7 @@ def main():
 
             # ОКНО ПРОДОЛЖЕНИЯ
             print(f"\n{'=' * 60}")
-            print(f"⏱️ ОКНО ПРОДОЛЖЕНИЯ ({FOLLOWUP_WINDOW} сек)")
+            print(f"ОКНО ПРОДОЛЖЕНИЯ ({FOLLOWUP_WINDOW} сек)")
             print("Говорите БЕЗ триггера, или молчите для выхода")
             print(f"{'=' * 60}")
 
@@ -691,7 +727,7 @@ def main():
                 remaining_time = followup_deadline - time.time()
 
                 if remaining_time <= 0:
-                    print("\n⏱️ Время вышло - возврат к триггеру")
+                    print("\nВремя вышло - возврат к триггеру")
                     break
 
                 continuation = listen_with_timeout(
@@ -705,30 +741,30 @@ def main():
                 if not continuation or len(continuation) < 2:
                     remaining = followup_deadline - time.time()
                     if remaining > 0:
-                        print(f"🤫 Молчание ({remaining:.1f}s осталось)")
+                        print(f"Молчание ({remaining:.1f}s осталось)")
                         continue
                     else:
-                        print("\n⏱️ Время вышло - возврат к триггеру")
+                        print("\nВремя вышло - возврат к триггеру")
                         break
 
-                print(f"\n👤 Продолжение: {continuation}")
+                print(f"\nПродолжение: {continuation}")
 
                 low_cont = continuation.lower()
                 if "стоп" in low_cont or "пока" in low_cont:
-                    print("👋 До свидания!")
+                    print("До свидания!")
                     speak("До свидания", TTS_ENGINE, TTS_VOICE, TTS_SPEED)
                     sys.exit(0)
 
                 user_time = datetime.datetime.now().strftime("%H:%M:%S")
                 user_text_for_model = f"[{user_time}] {continuation}"
 
-                print("⏳ Обрабатываю...")
+                print("Обрабатываю...")
                 play_sound("think")
 
                 try:
                     answer = llama(user_text_for_model, system_prompt, history, MODEL_NAME, OLLAMA_URL)
                 except Exception as e:
-                    print(f"❌ Ошибка: {e}")
+                    print(f"Ошибка: {e}")
                     answer = ""
 
                 if answer:
@@ -747,19 +783,23 @@ def main():
 
                 followup_deadline = time.time() + FOLLOWUP_WINDOW
                 print(f"\n{'=' * 60}")
-                print(f"⏱️ ОКНО ПРОДОЛЖЕНИЯ ({FOLLOWUP_WINDOW} сек)")
+                print(f"ОКНО ПРОДОЛЖЕНИЯ ({FOLLOWUP_WINDOW} сек)")
                 print("Говорите дальше, или молчите для выхода")
                 print(f"{'=' * 60}")
 
     except KeyboardInterrupt:
-        print("\n\n⏸️ Остановлено")
+        print("\n\nОстановлено")
     except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
+        print(f"\nОшибка: {e}")
         traceback.print_exc()
     finally:
-        print("\n👋 Выход...")
+        print("\nВыход...")
 
 if __name__ == "__main__":
-    print("SCRIPT DIR:", CURRENT_DIR)
-    print("HISTORY PATH:", HISTORY_FILE, "exists =", HISTORY_FILE.exists())
+    print("\n" + "=" * 60)
+    print("ГОЛОСОВОЙ АССИСТЕНТ АДА")
+    print("=" * 60)
+    print(f"Директория скрипта: {CURRENT_DIR}")
+    print(f"История: {HISTORY_FILE} (существует: {HISTORY_FILE.exists()})")
+    print("=" * 60 + "\n")
     main()

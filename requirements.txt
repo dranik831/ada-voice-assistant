@@ -1,0 +1,9 @@
+requests
+numpy
+sounddevice
+soundfile
+pyaudio
+playsound3
+torch
+openai-whisper
+omegaconf

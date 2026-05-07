@@ -8,6 +8,7 @@
     "WHISPER_MODEL": "small",
     "SAMPLE_RATE": 16000,
     "TTS_ENGINE": "silero",
-    "SILERO_SPEAKER": "baya",
-    "SILERO_SR": 48000
+    "SILERO_SPEAKER": "xenia",
+    "SILERO_SR": 48000,
+    "SMART_HOME_URL": "http://192.168.0.103"
 }

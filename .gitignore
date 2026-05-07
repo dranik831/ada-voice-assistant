@@ -15,5 +15,6 @@ history.json
 test.py
 testtest2.py
 testtest.py
+test_voices.py
 desktop_shortcuts
 .gitignore
